@@ -1,0 +1,118 @@
+---
+title: "Asthma Prevalence per state"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-10-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Question
+Is there a correlation between the proportion of low air quality days and prevalence of asthma per state? 
+
+## Hypothesis
+The state you live in does impact your chances of having asthma. The states with lower air quality will have higher rates of asthma.
+
+## Possible test to run 
+We could use the Glm test to test the probability that the correlation between air quality and asthma is significant, and use the linear regression model to test the strength of the correlation between asthma and air quality. 
+
+## Plot/Graph
+```{r asthma-ranked-bars, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=12, fig.cap="Adults with Current Asthma vs. Poor-Air Days by State (ranked by Asthma %)"}
+library(readr)
+library(dplyr)
+library(ggplot2)
+
+# Read your file (must be in the project Files pane)
+asthma <- read_csv("Prevalence of Asthma - Summarized Sheet (combined counties).csv", show_col_types = FALSE)
+
+# Clean, coerce, rank by asthma %
+df <- asthma %>%
+  transmute(
+    State        = as.character(State),
+    asthma_pct   = as.numeric(`Percent Adults with Current Asthma`),
+    poor_air_raw = as.numeric(`Proportion of "poor air quality" days`)
+  ) %>%
+  mutate(
+    poor_air_pct = ifelse(!is.na(poor_air_raw) & poor_air_raw <= 1, poor_air_raw * 100, poor_air_raw)
+  ) %>%
+  filter(!is.na(asthma_pct), !is.na(poor_air_pct)) %>%
+  arrange(desc(asthma_pct))
+
+# lock plotting order by asthma %
+df$State <- factor(df$State, levels = df$State)
+
+# build long data (no tidyr needed)
+df_long <- rbind(
+  data.frame(State = df$State, Measure = "Adults with Current Asthma (%)", Percent = df$asthma_pct),
+  data.frame(State = df$State, Measure = "Poor Air Quality Days (%)",      Percent = df$poor_air_pct)
+)
+
+# grouped, ranked bar plot
+ggplot(df_long, aes(x = State, y = Percent, fill = Measure)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.7) +
+  coord_flip() +
+  labs(x = NULL, y = "Percent",
+       title = "Adults with Current Asthma vs. Poor-Air Days by State (Ranked by Asthma %)") +
+  theme_minimal(base_size = 12) +
+  theme(legend.title = element_blank())
+
+
+
+```{r asthma-analysis, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+# Read your CSV (exact filename as in Files pane)
+asthma <- read_csv("Prevalence of Asthma - Summarized Sheet (combined counties).csv",
+                   show_col_types = FALSE)
+
+# Prep: coerce types & compute percent for poor-air if given as 0–1 proportion
+df <- asthma %>%
+  transmute(
+    State        = as.character(State),
+    asthma_pct   = as.numeric(`Percent Adults with Current Asthma`),
+    poor_air_raw = as.numeric(`Proportion of "poor air quality" days`)
+  ) %>%
+  mutate(
+    poor_air_pct = ifelse(!is.na(poor_air_raw) & poor_air_raw <= 1,
+                          poor_air_raw * 100, poor_air_raw)
+  ) %>%
+  filter(!is.na(asthma_pct), !is.na(poor_air_pct))
+
+# Correlations & simple regression
+pearson  <- cor.test(df$poor_air_pct, df$asthma_pct, method = "pearson")
+spearman <- cor.test(df$poor_air_pct, df$asthma_pct, method = "spearman")
+m        <- lm(asthma_pct ~ poor_air_pct, data = df)
+s        <- summary(m)
+ci       <- confint(m)["poor_air_pct", ]
+
+## Significance and Results
+# Narrative that prints into the knit
+cat("Significance\n\n")
+cat(sprintf("- **Pearson correlation** (asthma %% vs poor-air %%): **r = %.3f**, **p = %.3g**.\n",
+            unname(pearson$estimate), pearson$p.value))
+cat(sprintf("- **Spearman correlation** (rank-based): **rho = %.3f**, p = %.3g.\n",
+            unname(spearman$estimate), spearman$p.value))
+cat(sprintf("- **Linear model**: asthma = %.3f + (%.3f × poor-air%%); 95%% CI for slope **[%.3f, %.3f]**; **R² = %.3f**.\n\n",
+            coef(m)[1], coef(m)[2], ci[1], ci[2], s$r.squared))
+
+if (pearson$p.value < 0.05) {
+  cat("**Interpretation:** There is a statistically significant but **weak** relationship; the sign is given by the slope above. \n\n")
+} else {
+  cat("**Interpretation:** No statistically significant relationship at α = 0.05.\n\n")
+}
+
+# Small ranked tables to include in the knit
+top_asthma    <- df %>% arrange(desc(asthma_pct)) %>% select(State, `Adults with Asthma (%)` = asthma_pct) %>% head(5)
+bottom_asthma <- df %>% arrange(asthma_pct)       %>% select(State, `Adults with Asthma (%)` = asthma_pct) %>% head(5)
+top_poor      <- df %>% arrange(desc(poor_air_pct))%>% select(State, `Poor-Air Days (%)` = poor_air_pct) %>% head(5)
+bottom_poor   <- df %>% arrange(poor_air_pct)     %>% select(State, `Poor-Air Days (%)` = poor_air_pct) %>% head(5)
+
+kable(top_asthma,    caption = "Top 5 states by adult asthma (%)")
+kable(bottom_asthma, caption = "Bottom 5 states by adult asthma (%)")
+kable(top_poor,      caption = "Top 5 states by poor-air days (%)")
+kable(bottom_poor,   caption = "Bottom 5 states by poor-air days (%)")
